@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <fcntl.h>
 #include <math.h>
+#include <float.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,6 +14,12 @@
 #else
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
+#if defined(_OPENMP)
+#include <omp.h>
+#endif
+#if defined(__aarch64__)
+#include <arm_neon.h>
 #endif
 // ----------------------------------------------------------------------------
 // Globals
@@ -135,8 +142,37 @@ void free_run_state(RunState *s) {
 // Quantization functions
 
 void dequantize(QuantizedTensor *qx, float *x, int n) {
-  for (int i = 0; i < n; i++) {
-    x[i] = qx->q[i] * qx->s[i / GS];
+  int num_groups = n / GS;
+  for (int group = 0; group < num_groups; group++) {
+    float scale = qx->s[group];
+    int i = 0;
+#if defined(__aarch64__)
+    float32x4_t vscale = vdupq_n_f32(scale);
+    for (; i + 16 <= GS; i += 16) {
+      int8x16_t b = vld1q_s8(qx->q + group * GS + i);
+      
+      int16x8_t b_low = vmovl_s8(vget_low_s8(b));
+      int16x8_t b_high = vmovl_s8(vget_high_s8(b));
+      
+      int32x4_t b_low_low = vmovl_s16(vget_low_s16(b_low));
+      int32x4_t b_low_high = vmovl_s16(vget_high_s16(b_low));
+      int32x4_t b_high_low = vmovl_s16(vget_low_s16(b_high));
+      int32x4_t b_high_high = vmovl_s16(vget_high_s16(b_high));
+      
+      float32x4_t f0 = vcvtq_f32_s32(b_low_low);
+      float32x4_t f1 = vcvtq_f32_s32(b_low_high);
+      float32x4_t f2 = vcvtq_f32_s32(b_high_low);
+      float32x4_t f3 = vcvtq_f32_s32(b_high_high);
+      
+      vst1q_f32(x + group * GS + i, vmulq_f32(f0, vscale));
+      vst1q_f32(x + group * GS + i + 4, vmulq_f32(f1, vscale));
+      vst1q_f32(x + group * GS + i + 8, vmulq_f32(f2, vscale));
+      vst1q_f32(x + group * GS + i + 12, vmulq_f32(f3, vscale));
+    }
+#endif
+    for (; i < GS; i++) {
+      x[group * GS + i] = qx->q[group * GS + i] * scale;
+    }
   }
 }
 
@@ -147,8 +183,27 @@ void quantize(QuantizedTensor *qx, float *x, int n) {
   for (int group = 0; group < num_groups; group++) {
 
     // find the max absolute value in the current group
-    float wmax = 0.0;
-    for (int i = 0; i < GS; i++) {
+    float wmax = 0.0f;
+    int i = 0;
+#if defined(__aarch64__)
+    float32x4_t vmax = vdupq_n_f32(0.0f);
+    for (; i + 16 <= GS; i += 16) {
+      float32x4_t v0 = vld1q_f32(x + group * GS + i);
+      float32x4_t v1 = vld1q_f32(x + group * GS + i + 4);
+      float32x4_t v2 = vld1q_f32(x + group * GS + i + 8);
+      float32x4_t v3 = vld1q_f32(x + group * GS + i + 12);
+      vmax = vmaxq_f32(vmax, vabsq_f32(v0));
+      vmax = vmaxq_f32(vmax, vabsq_f32(v1));
+      vmax = vmaxq_f32(vmax, vabsq_f32(v2));
+      vmax = vmaxq_f32(vmax, vabsq_f32(v3));
+    }
+    float max_val = vgetq_lane_f32(vmax, 0);
+    max_val = fmaxf(max_val, vgetq_lane_f32(vmax, 1));
+    max_val = fmaxf(max_val, vgetq_lane_f32(vmax, 2));
+    max_val = fmaxf(max_val, vgetq_lane_f32(vmax, 3));
+    if (max_val > wmax) wmax = max_val;
+#endif
+    for (; i < GS; i++) {
       float val = fabs(x[group * GS + i]);
       if (val > wmax) {
         wmax = val;
@@ -160,10 +215,49 @@ void quantize(QuantizedTensor *qx, float *x, int n) {
     qx->s[group] = scale;
 
     // calculate and write the quantized values
-    for (int i = 0; i < GS; i++) {
-      float quant_value = x[group * GS + i] / scale; // scale
-      int8_t quantized = (int8_t)round(quant_value); // round and clamp
-      qx->q[group * GS + i] = quantized;
+    if (scale == 0.0f) {
+      memset(qx->q + group * GS, 0, GS * sizeof(int8_t));
+    } else {
+      float inv_scale = 1.0f / scale;
+      i = 0;
+#if defined(__aarch64__)
+      float32x4_t vinv = vdupq_n_f32(inv_scale);
+      for (; i + 16 <= GS; i += 16) {
+        float32x4_t v0 = vld1q_f32(x + group * GS + i);
+        float32x4_t v1 = vld1q_f32(x + group * GS + i + 4);
+        float32x4_t v2 = vld1q_f32(x + group * GS + i + 8);
+        float32x4_t v3 = vld1q_f32(x + group * GS + i + 12);
+
+        v0 = vmulq_f32(v0, vinv);
+        v1 = vmulq_f32(v1, vinv);
+        v2 = vmulq_f32(v2, vinv);
+        v3 = vmulq_f32(v3, vinv);
+
+        int32x4_t vi0 = vcvtaq_s32_f32(v0);
+        int32x4_t vi1 = vcvtaq_s32_f32(v1);
+        int32x4_t vi2 = vcvtaq_s32_f32(v2);
+        int32x4_t vi3 = vcvtaq_s32_f32(v3);
+
+        int16x4_t vn0 = vqmovn_s32(vi0); // narrow to 16-bit
+        int16x4_t vn1 = vqmovn_s32(vi1); // narrow to 16-bit
+        int16x4_t vn2 = vqmovn_s32(vi2); // narrow to 16-bit
+        int16x4_t vn3 = vqmovn_s32(vi3); // narrow to 16-bit
+
+        int16x8_t vq0 = vcombine_s16(vn0, vn1);
+        int16x8_t vq1 = vcombine_s16(vn2, vn3);
+        
+        int8x8_t vb0 = vqmovn_s16(vq0);
+        int8x8_t vb1 = vqmovn_s16(vq1);
+        
+        int8x16_t vfinal = vcombine_s8(vb0, vb1);
+        vst1q_s8(qx->q + group * GS + i, vfinal);
+      }
+#endif
+      for (; i < GS; i++) {
+        float quant_value = x[group * GS + i] * inv_scale;
+        int8_t quantized = (int8_t)roundf(quant_value);
+        qx->q[group * GS + i] = quantized;
+      }
     }
   }
 }
@@ -313,7 +407,60 @@ void free_transformer(Transformer *t) {
 // neural net blocks; the dynamics of the Transformer
 
 void rmsnorm(float *o, float *x, float *weight, int size) {
-  // calculate sum of squares
+  
+#if defined(__aarch64__)
+  int i = 0;
+  float32x4_t acc0 = vdupq_n_f32(0.0f);
+  float32x4_t acc1 = vdupq_n_f32(0.0f);
+  float32x4_t acc2 = vdupq_n_f32(0.0f);
+  float32x4_t acc3 = vdupq_n_f32(0.0f);
+  for (; i + 16 <= size; i += 16) {
+    float32x4_t x0 = vld1q_f32(x + i);
+    float32x4_t x1 = vld1q_f32(x + i + 4);
+    float32x4_t x2 = vld1q_f32(x + i + 8);
+    float32x4_t x3 = vld1q_f32(x + i + 12);
+    acc0 = vmlaq_f32(acc0, x0, x0);
+    acc1 = vmlaq_f32(acc1, x1, x1);
+    acc2 = vmlaq_f32(acc2, x2, x2);
+    acc3 = vmlaq_f32(acc3, x3, x3);
+  }
+  float32x4_t acc = vaddq_f32(vaddq_f32(acc0, acc1), vaddq_f32(acc2, acc3));
+  for (; i + 4 <= size; i += 4) {
+    float32x4_t x0 = vld1q_f32(x + i);
+    acc = vmlaq_f32(acc, x0, x0);
+  }
+  float ss = vaddvq_f32(acc);
+  for (; i < size; i++) {
+    ss += x[i] * x[i];
+  }
+  ss /= size;
+  ss += 1e-5f;
+  float inv = 1.0f / sqrtf(ss);
+  i = 0;
+  float32x4_t vinv = vdupq_n_f32(inv);
+  for (; i + 16 <= size; i += 16) {
+    float32x4_t x0 = vld1q_f32(x + i);
+    float32x4_t w0 = vld1q_f32(weight + i);
+    float32x4_t x1 = vld1q_f32(x + i + 4);
+    float32x4_t w1 = vld1q_f32(weight + i + 4);
+    float32x4_t x2 = vld1q_f32(x + i + 8);
+    float32x4_t w2 = vld1q_f32(weight + i + 8);
+    float32x4_t x3 = vld1q_f32(x + i + 12);
+    float32x4_t w3 = vld1q_f32(weight + i + 12);
+    vst1q_f32(o + i, vmulq_f32(w0, vmulq_f32(vinv, x0)));
+    vst1q_f32(o + i + 4, vmulq_f32(w1, vmulq_f32(vinv, x1)));
+    vst1q_f32(o + i + 8, vmulq_f32(w2, vmulq_f32(vinv, x2)));
+    vst1q_f32(o + i + 12, vmulq_f32(w3, vmulq_f32(vinv, x3)));
+  }
+  for (; i + 4 <= size; i += 4) {
+    float32x4_t xv = vld1q_f32(x + i);
+    float32x4_t wv = vld1q_f32(weight + i);
+    vst1q_f32(o + i, vmulq_f32(wv, vmulq_f32(vinv, xv)));
+  }
+  for (; i < size; i++) {
+    o[i] = weight[i] * (inv * x[i]);
+  }
+#else
   float ss = 0.0f;
   for (int j = 0; j < size; j++) {
     ss += x[j] * x[j];
@@ -321,39 +468,103 @@ void rmsnorm(float *o, float *x, float *weight, int size) {
   ss /= size;
   ss += 1e-5f;
   ss = 1.0f / sqrtf(ss);
-  // normalize and scale
   for (int j = 0; j < size; j++) {
     o[j] = weight[j] * (ss * x[j]);
   }
+#endif
+}
+
+static inline float fast_exp(float x) {
+  if (x < -80.0f) return 0.0f;
+  if (x > 80.0f) x = 80.0f;
+  const float INV_LN2 = 1.4426950408889634f;
+  const float LN2 = 0.6931471805599453f;
+  float y = x * INV_LN2;
+  float n = floorf(y + 0.5f);
+  float f = y - n;
+  float z = f * LN2;
+  float p = 1.0f + z * (1.0f + z * (0.5f + z * (0.1666666716f + z * (0.0416666679f + z * 0.0083333338f))));
+  return ldexpf(p, (int)n);
+}
+
+static inline float fast_sigmoid(float x) {
+  return 1.0f / (1.0f + fast_exp(-x));
 }
 
 void softmax(float *x, int size) {
-  // find max value (for numerical stability)
-  float max_val = x[0];
-  for (int i = 1; i < size; i++) {
-    if (x[i] > max_val) {
-      max_val = x[i];
-    }
+  float max_val;
+#if defined(__aarch64__)
+  int i = 0;
+  float32x4_t vmaxv = vdupq_n_f32(-FLT_MAX);
+  for (; i + 16 <= size; i += 16) {
+    float32x4_t xv0 = vld1q_f32(x + i);
+    float32x4_t xv1 = vld1q_f32(x + i + 4);
+    float32x4_t xv2 = vld1q_f32(x + i + 8);
+    float32x4_t xv3 = vld1q_f32(x + i + 12);
+    vmaxv = vmaxq_f32(vmaxv, xv0);
+    vmaxv = vmaxq_f32(vmaxv, xv1);
+    vmaxv = vmaxq_f32(vmaxv, xv2);
+    vmaxv = vmaxq_f32(vmaxv, xv3);
   }
-  // exp and sum
+  for (; i + 4 <= size; i += 4) {
+    float32x4_t xv = vld1q_f32(x + i);
+    vmaxv = vmaxq_f32(vmaxv, xv);
+  }
+  max_val = vgetq_lane_f32(vmaxv, 0);
+  max_val = fmaxf(max_val, vgetq_lane_f32(vmaxv, 1));
+  max_val = fmaxf(max_val, vgetq_lane_f32(vmaxv, 2));
+  max_val = fmaxf(max_val, vgetq_lane_f32(vmaxv, 3));
+  for (; i < size; i++) {
+    if (x[i] > max_val) max_val = x[i];
+  }
   float sum = 0.0f;
-  for (int i = 0; i < size; i++) {
-    x[i] = expf(x[i] - max_val);
+  for (i = 0; i < size; i++) {
+    x[i] = fast_exp(x[i] - max_val);
     sum += x[i];
   }
-  // normalize
-  for (int i = 0; i < size; i++) {
+  float32x4_t vsum = vdupq_n_f32(sum);
+  i = 0;
+  for (; i + 4 <= size; i += 4) {
+    float32x4_t xv = vld1q_f32(x + i);
+    xv = vdivq_f32(xv, vsum);
+    vst1q_f32(x + i, xv);
+  }
+  for (; i < size; i++) {
     x[i] /= sum;
   }
+#else
+  max_val = x[0];
+  for (int j = 1; j < size; j++) {
+    if (x[j] > max_val) max_val = x[j];
+  }
+  float sum = 0.0f;
+  for (int j = 0; j < size; j++) {
+    x[j] = fast_exp(x[j] - max_val);
+    sum += x[j];
+  }
+  for (int j = 0; j < size; j++) {
+    x[j] /= sum;
+  }
+#endif
 }
 
-void matmul(float *xout, QuantizedTensor *x, QuantizedTensor *w, int n, int d) {
+#if defined(__aarch64__)
+static inline int32_t neon_dot_s8_block16(const int8_t *a, const int8_t *b) {
+  int32x4_t acc = vdupq_n_s32(0);
+  int8x16_t va = vld1q_s8(a);
+  int8x16_t vb = vld1q_s8(b);
+  acc = vdotq_s32(acc, va, vb);
+  return vaddvq_s32(acc);
+}
+#endif
+
+void matmul(float *__restrict xout, QuantizedTensor *__restrict x, QuantizedTensor *__restrict w, int n, int d) {
   // W (d,n) @ x (n,) -> xout (d,)
   // by far the most amount of time is spent inside this little function
   // inputs to this function are both quantized
 
   int i;
-#pragma omp parallel for private(i)
+#pragma omp parallel for schedule(static) private(i)
   for (i = 0; i < d; i++) {
 
     float val = 0.0f;
@@ -363,10 +574,53 @@ void matmul(float *xout, QuantizedTensor *x, QuantizedTensor *w, int n, int d) {
     // do the matmul in groups of GS
     int j;
     for (j = 0; j <= n - GS; j += GS) {
+      float scale = w->s[(in + j) / GS] * x->s[j / GS];
+      __builtin_prefetch(&w->q[in + j + GS], 0, 0); // Prefetch next block of weights
+
+#if defined(__aarch64__)
+      int k = 0;
+      int32x4_t vacc0 = vdupq_n_s32(0);
+      int32x4_t vacc1 = vdupq_n_s32(0);
+      int32x4_t vacc2 = vdupq_n_s32(0);
+      int32x4_t vacc3 = vdupq_n_s32(0);
+      
+      for (; k + 64 <= GS; k += 64) {
+        int8x16_t va0 = vld1q_s8(x->q + j + k);
+        int8x16_t vb0 = vld1q_s8(w->q + in + j + k);
+        vacc0 = vdotq_s32(vacc0, va0, vb0);
+        
+        int8x16_t va1 = vld1q_s8(x->q + j + k + 16);
+        int8x16_t vb1 = vld1q_s8(w->q + in + j + k + 16);
+        vacc1 = vdotq_s32(vacc1, va1, vb1);
+        
+        int8x16_t va2 = vld1q_s8(x->q + j + k + 32);
+        int8x16_t vb2 = vld1q_s8(w->q + in + j + k + 32);
+        vacc2 = vdotq_s32(vacc2, va2, vb2);
+        
+        int8x16_t va3 = vld1q_s8(x->q + j + k + 48);
+        int8x16_t vb3 = vld1q_s8(w->q + in + j + k + 48);
+        vacc3 = vdotq_s32(vacc3, va3, vb3);
+      }
+      
+      for (; k + 16 <= GS; k += 16) {
+        int8x16_t va = vld1q_s8(x->q + j + k);
+        int8x16_t vb = vld1q_s8(w->q + in + j + k);
+        vacc0 = vdotq_s32(vacc0, va, vb);
+      }
+      
+      vacc0 = vaddq_s32(vacc0, vacc1);
+      vacc2 = vaddq_s32(vacc2, vacc3);
+      ival = vaddvq_s32(vaddq_s32(vacc0, vacc2));
+      
+      for (; k < GS; k++) {
+        ival += ((int32_t)x->q[j + k]) * ((int32_t)w->q[in + j + k]);
+      }
+#else
       for (int k = 0; k < GS; k++) {
         ival += ((int32_t)x->q[j + k]) * ((int32_t)w->q[in + j + k]);
       }
-      val += ((float)ival) * w->s[(in + j) / GS] * x->s[j / GS];
+#endif
+      val += ((float)ival) * scale;
       ival = 0;
     }
 
@@ -403,12 +657,68 @@ float *forward(Transformer *transformer, int token, int pos) {
     matmul(s->v, &s->xq, w->wv + l, dim, kv_dim);
 
     // RoPE relative positional encoding: complex-valued rotate q and k in each head
+    // Precompute cos/sin for this position
+    float fcr_cache[head_size];
+    float fci_cache[head_size];
+    for (int j = 0; j < head_size; j += 2) {
+      float freq = 1.0f / powf(500000.0f, (float)j / (float)head_size);
+      float val = pos * freq;
+      float c = cosf(val);
+      float s_val = sinf(val);
+      fcr_cache[j] = c;
+      fcr_cache[j + 1] = c;
+      fci_cache[j] = s_val;
+      fci_cache[j + 1] = s_val;
+    }
+
     for (int i = 0; i < p->n_heads; i++) {
-      for (int j = 0; j < head_size; j += 2) {
-        float freq = 1.0f / powf(500000.0f, (float)j / (float)head_size);
-        float val = pos * freq;
-        float fcr = cosf(val);
-        float fci = sinf(val);
+      int j = 0;
+#if defined(__aarch64__)
+      for (; j + 8 <= head_size; j += 8) {
+         // Process 4 pairs (8 elements) at a time
+         // Load q
+         float32x4x2_t q_vec = vld2q_f32(s->q + i * head_size + j);
+         float32x4_t q_real = q_vec.val[0];
+         float32x4_t q_imag = q_vec.val[1];
+         
+         // Load cos/sin
+         // fcr_cache has duplicates: c0, c0, c2, c2...
+         // We need c0, c2, c4, c6 for the vector op?
+         // vld2q_f32 on cache will separate evens and odds.
+         // Since evens == odds, both val[0] and val[1] will be c0, c2, c4, c6.
+         // Perfect.
+         float32x4x2_t fcr_vec = vld2q_f32(fcr_cache + j);
+         float32x4x2_t fci_vec = vld2q_f32(fci_cache + j);
+         float32x4_t fcr = fcr_vec.val[0];
+         float32x4_t fci = fci_vec.val[0];
+         
+         // Rotate q
+         // q_real_new = q_real * fcr - q_imag * fci
+         // q_imag_new = q_real * fci + q_imag * fcr
+         float32x4_t q_real_new = vsubq_f32(vmulq_f32(q_real, fcr), vmulq_f32(q_imag, fci));
+         float32x4_t q_imag_new = vaddq_f32(vmulq_f32(q_real, fci), vmulq_f32(q_imag, fcr));
+         
+         q_vec.val[0] = q_real_new;
+         q_vec.val[1] = q_imag_new;
+         vst2q_f32(s->q + i * head_size + j, q_vec);
+         
+         if (i < p->n_kv_heads) {
+             float32x4x2_t k_vec = vld2q_f32(s->k + i * head_size + j);
+             float32x4_t k_real = k_vec.val[0];
+             float32x4_t k_imag = k_vec.val[1];
+             
+             float32x4_t k_real_new = vsubq_f32(vmulq_f32(k_real, fcr), vmulq_f32(k_imag, fci));
+             float32x4_t k_imag_new = vaddq_f32(vmulq_f32(k_real, fci), vmulq_f32(k_imag, fcr));
+             
+             k_vec.val[0] = k_real_new;
+             k_vec.val[1] = k_imag_new;
+             vst2q_f32(s->k + i * head_size + j, k_vec);
+         }
+      }
+#endif
+      for (; j < head_size; j += 2) {
+        float fcr = fcr_cache[j];
+        float fci = fci_cache[j];
         float q0 = s->q[i * head_size + j];
         float q1 = s->q[i * head_size + j + 1];
         s->q[i * head_size + j] = q0 * fcr - q1 * fci;
@@ -438,16 +748,76 @@ float *forward(Transformer *transformer, int token, int pos) {
       // attention scores for this head
       float *att = s->att + h * p->seq_len;
       // iterate over all timesteps, including the current one
-      for (int t = 0; t <= pos; t++) {
-        // get the key vector for this head and at this timestep
+      int t = 0;
+#if defined(__aarch64__)
+      for (; t <= pos - 3; t += 4) {
+          float *k0 = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+          float *k1 = s->key_cache + loff + (t+1) * kv_dim + (h / kv_mul) * head_size;
+          float *k2 = s->key_cache + loff + (t+2) * kv_dim + (h / kv_mul) * head_size;
+          float *k3 = s->key_cache + loff + (t+3) * kv_dim + (h / kv_mul) * head_size;
+          
+          float32x4_t vacc0 = vdupq_n_f32(0.0f);
+          float32x4_t vacc1 = vdupq_n_f32(0.0f);
+          float32x4_t vacc2 = vdupq_n_f32(0.0f);
+          float32x4_t vacc3 = vdupq_n_f32(0.0f);
+          
+          int vi = 0;
+          for (; vi + 4 <= head_size; vi += 4) {
+              float32x4_t qv = vld1q_f32(q + vi);
+              
+              float32x4_t kv0 = vld1q_f32(k0 + vi);
+              float32x4_t kv1 = vld1q_f32(k1 + vi);
+              float32x4_t kv2 = vld1q_f32(k2 + vi);
+              float32x4_t kv3 = vld1q_f32(k3 + vi);
+              
+              vacc0 = vmlaq_f32(vacc0, qv, kv0);
+              vacc1 = vmlaq_f32(vacc1, qv, kv1);
+              vacc2 = vmlaq_f32(vacc2, qv, kv2);
+              vacc3 = vmlaq_f32(vacc3, qv, kv3);
+          }
+          
+          float score0 = vaddvq_f32(vacc0);
+          float score1 = vaddvq_f32(vacc1);
+          float score2 = vaddvq_f32(vacc2);
+          float score3 = vaddvq_f32(vacc3);
+          
+          for (; vi < head_size; vi++) {
+              float qval = q[vi];
+              score0 += qval * k0[vi];
+              score1 += qval * k1[vi];
+              score2 += qval * k2[vi];
+              score3 += qval * k3[vi];
+          }
+          
+          float scale = 1.0f / sqrtf(head_size);
+          att[t] = score0 * scale;
+          att[t+1] = score1 * scale;
+          att[t+2] = score2 * scale;
+          att[t+3] = score3 * scale;
+      }
+#endif
+      for (; t <= pos; t++) {
         float *k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // calculate the attention score as the dot product of q and k
         float score = 0.0f;
-        for (int i = 0; i < head_size; i++) {
-          score += q[i] * k[i];
+#if defined(__aarch64__)
+        int vi = 0;
+        float32x4_t vacc = vdupq_n_f32(0.0f);
+        for (; vi + 4 <= head_size; vi += 4) {
+          float32x4_t qv = vld1q_f32(q + vi);
+          float32x4_t kv = vld1q_f32(k + vi);
+          vacc = vmlaq_f32(vacc, qv, kv);
         }
+        score = vaddvq_f32(vacc);
+        for (; vi < head_size; vi++) {
+          score += q[vi] * k[vi];
+        }
+#else
+        int vi = 0;
+        for (; vi < head_size; vi++) {
+          score += q[vi] * k[vi];
+        }
+#endif
         score /= sqrtf(head_size);
-        // save the score to the attention buffer
         att[t] = score;
       }
 
@@ -457,15 +827,60 @@ float *forward(Transformer *transformer, int token, int pos) {
       // weighted sum of the values, store back into xb
       float *xb = s->xb + h * head_size;
       memset(xb, 0, head_size * sizeof(float));
-      for (int t = 0; t <= pos; t++) {
-        // get the value vector for this head and at this timestep
-        float *v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // get the attention weight for this timestep
-        float a = att[t];
-        // accumulate the weighted value into xb
-        for (int i = 0; i < head_size; i++) {
-          xb[i] += a * v[i];
+      t = 0;
+#if defined(__aarch64__)
+      // loop unrolling for weighted sum
+      for (; t <= pos - 3; t += 4) {
+        float *v0 = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+        float *v1 = s->value_cache + loff + (t + 1) * kv_dim + (h / kv_mul) * head_size;
+        float *v2 = s->value_cache + loff + (t + 2) * kv_dim + (h / kv_mul) * head_size;
+        float *v3 = s->value_cache + loff + (t + 3) * kv_dim + (h / kv_mul) * head_size;
+        float a0 = att[t];
+        float a1 = att[t + 1];
+        float a2 = att[t + 2];
+        float a3 = att[t + 3];
+        float32x4_t va0 = vdupq_n_f32(a0);
+        float32x4_t va1 = vdupq_n_f32(a1);
+        float32x4_t va2 = vdupq_n_f32(a2);
+        float32x4_t va3 = vdupq_n_f32(a3);
+        int vi = 0;
+        for (; vi + 4 <= head_size; vi += 4) {
+          float32x4_t xbv = vld1q_f32(xb + vi);
+          float32x4_t vb0 = vld1q_f32(v0 + vi);
+          float32x4_t vb1 = vld1q_f32(v1 + vi);
+          float32x4_t vb2 = vld1q_f32(v2 + vi);
+          float32x4_t vb3 = vld1q_f32(v3 + vi);
+          xbv = vmlaq_f32(xbv, vb0, va0);
+          xbv = vmlaq_f32(xbv, vb1, va1);
+          xbv = vmlaq_f32(xbv, vb2, va2);
+          xbv = vmlaq_f32(xbv, vb3, va3);
+          vst1q_f32(xb + vi, xbv);
         }
+        for (; vi < head_size; vi++) {
+          xb[vi] += a0 * v0[vi] + a1 * v1[vi] + a2 * v2[vi] + a3 * v3[vi];
+        }
+      }
+#endif
+      for (; t <= pos; t++) {
+        float *v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+        float a = att[t];
+#if defined(__aarch64__)
+        int vi = 0;
+        float32x4_t va = vdupq_n_f32(a);
+        for (; vi + 4 <= head_size; vi += 4) {
+          float32x4_t vb = vld1q_f32(v + vi);
+          float32x4_t xbv = vld1q_f32(xb + vi);
+          xbv = vmlaq_f32(xbv, vb, va);
+          vst1q_f32(xb + vi, xbv);
+        }
+        for (; vi < head_size; vi++) {
+          xb[vi] += a * v[vi];
+        }
+#else
+        for (int vi = 0; vi < head_size; vi++) {
+          xb[vi] += a * v[vi];
+        }
+#endif
       }
     }
 
@@ -488,13 +903,77 @@ float *forward(Transformer *transformer, int token, int pos) {
     matmul(s->hb2, &s->xq, w->w3 + l, dim, hidden_dim);
 
     // SwiGLU non-linearity
-    for (int i = 0; i < hidden_dim; i++) {
-      float val = s->hb[i];
-      // silu(x)=x*s(x), where s(x) is the logistic sigmoid
-      val *= (1.0f / (1.0f + expf(-val)));
-      // elementwise multiply with w3(x)
-      val *= s->hb2[i];
-      s->hb[i] = val;
+    int gi = 0;
+#if defined(__aarch64__)
+    for (; gi + 16 <= hidden_dim; gi += 16) {
+      float32x4_t vhb0 = vld1q_f32(s->hb + gi);
+      float32x4_t vhb1 = vld1q_f32(s->hb + gi + 4);
+      float32x4_t vhb2 = vld1q_f32(s->hb + gi + 8);
+      float32x4_t vhb3 = vld1q_f32(s->hb + gi + 12);
+      
+      float32x4_t vhb2_0 = vld1q_f32(s->hb2 + gi);
+      float32x4_t vhb2_1 = vld1q_f32(s->hb2 + gi + 4);
+      float32x4_t vhb2_2 = vld1q_f32(s->hb2 + gi + 8);
+      float32x4_t vhb2_3 = vld1q_f32(s->hb2 + gi + 12);
+
+      // sigmoid approximation for 4 vectors
+      float32x4_t vsig0, vsig1, vsig2, vsig3;
+      
+      // Vector 0
+      {
+          float sig0 = fast_sigmoid(vgetq_lane_f32(vhb0, 0));
+          float sig1 = fast_sigmoid(vgetq_lane_f32(vhb0, 1));
+          float sig2 = fast_sigmoid(vgetq_lane_f32(vhb0, 2));
+          float sig3 = fast_sigmoid(vgetq_lane_f32(vhb0, 3));
+          vsig0 = (float32x4_t){sig0, sig1, sig2, sig3};
+      }
+      // Vector 1
+      {
+          float sig0 = fast_sigmoid(vgetq_lane_f32(vhb1, 0));
+          float sig1 = fast_sigmoid(vgetq_lane_f32(vhb1, 1));
+          float sig2 = fast_sigmoid(vgetq_lane_f32(vhb1, 2));
+          float sig3 = fast_sigmoid(vgetq_lane_f32(vhb1, 3));
+          vsig1 = (float32x4_t){sig0, sig1, sig2, sig3};
+      }
+      // Vector 2
+      {
+          float sig0 = fast_sigmoid(vgetq_lane_f32(vhb2, 0));
+          float sig1 = fast_sigmoid(vgetq_lane_f32(vhb2, 1));
+          float sig2 = fast_sigmoid(vgetq_lane_f32(vhb2, 2));
+          float sig3 = fast_sigmoid(vgetq_lane_f32(vhb2, 3));
+          vsig2 = (float32x4_t){sig0, sig1, sig2, sig3};
+      }
+      // Vector 3
+      {
+          float sig0 = fast_sigmoid(vgetq_lane_f32(vhb3, 0));
+          float sig1 = fast_sigmoid(vgetq_lane_f32(vhb3, 1));
+          float sig2 = fast_sigmoid(vgetq_lane_f32(vhb3, 2));
+          float sig3 = fast_sigmoid(vgetq_lane_f32(vhb3, 3));
+          vsig3 = (float32x4_t){sig0, sig1, sig2, sig3};
+      }
+
+      vst1q_f32(s->hb + gi, vmulq_f32(vmulq_f32(vhb0, vsig0), vhb2_0));
+      vst1q_f32(s->hb + gi + 4, vmulq_f32(vmulq_f32(vhb1, vsig1), vhb2_1));
+      vst1q_f32(s->hb + gi + 8, vmulq_f32(vmulq_f32(vhb2, vsig2), vhb2_2));
+      vst1q_f32(s->hb + gi + 12, vmulq_f32(vmulq_f32(vhb3, vsig3), vhb2_3));
+    }
+    for (; gi + 4 <= hidden_dim; gi += 4) {
+      float32x4_t vhb = vld1q_f32(s->hb + gi);
+      float sig0 = fast_sigmoid(vgetq_lane_f32(vhb, 0));
+      float sig1 = fast_sigmoid(vgetq_lane_f32(vhb, 1));
+      float sig2 = fast_sigmoid(vgetq_lane_f32(vhb, 2));
+      float sig3 = fast_sigmoid(vgetq_lane_f32(vhb, 3));
+      float32x4_t vsig = (float32x4_t){sig0, sig1, sig2, sig3};
+      float32x4_t vhb2 = vld1q_f32(s->hb2 + gi);
+      float32x4_t vout = vmulq_f32(vmulq_f32(vhb, vsig), vhb2);
+      vst1q_f32(s->hb + gi, vout);
+    }
+#endif
+    for (; gi < hidden_dim; gi++) {
+      float val = s->hb[gi];
+      val *= fast_sigmoid(val);
+      val *= s->hb2[gi];
+      s->hb[gi] = val;
     }
 
     // final matmul to get the output of the ffn
@@ -1209,6 +1688,11 @@ int main(int argc, char *argv[]) {
   build_sampler(&sampler, transformer.config.vocab_size, temperature, topp, rng_seed);
 
   // run!
+#ifndef TESTING
+#if defined(_OPENMP)
+  omp_set_num_threads(4);
+#endif
+#endif
   if (strcmp(mode, "generate") == 0) {
     generate(&transformer, &tokenizer, &sampler, prompt, steps);
   } else if (strcmp(mode, "chat") == 0) {
