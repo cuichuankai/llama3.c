@@ -19,7 +19,7 @@ Please note that this repo is a modificaion of Andrej Karpathy's llama2.c but ch
 First, navigate to the folder where you keep your projects and clone this repository to this folder:
 
 ```bash
-git clone https://github.com/jameswdelancey/llama3.c.git
+git clone https://github.com/cuichuankai/llama3.c.git
 ```
 
 Then, open the repository folder:
@@ -63,6 +63,12 @@ gcc -Ofast run.c -o run
 
 ```bash
 $ gcc -Ofast -fopenmp -march=native run.c win.c -o run
+```
+# high performance with NEON
+You can build a high performance android native bin which optimized through NEON instructions
+```bash
+$ make androidq-arm64
+./bin/android/arm64-v8a/runq "llama3_8b_instruct_q8.bin" -z "../dev/tokenizer_llama3.bin" -i "Once upon a time"
 ```
 
 # base model single shot
