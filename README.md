@@ -6,50 +6,50 @@ cd llama3.c
 make androidq-arm64
 ./bin/android/arm64-v8a/runq ./llama3.2_3b_instruct_q80.bin  -z ./llama3_tokenizer.bin -i "i am a teacher"
 ```
-> i am a teacher looking for a series to read with my class of Year 3/4 students. There are 14 students in the class, so a series with 7-10 books would be ideal. I'm looking for something that will engage my students, promote learning, and align with the English curriculum.
+> i am a teacher looking for a series to read with my class of Year 3/4 students. There are 14 students in the class, so a series with 7-10 books would be ideal. I'm looking for something that will engage my students, promote learning, and align with the English curriculum. 
+>  
+> Here are some factors I consider in choosing a series: 
+>  
+> * Reading level: should be accessible to my students (around Grade 3-4) 
+> * Thematic resonance: should resonate with the current year group, focusing on issues relevant to them 
+> * Illustrations: colorful and engaging, or illustrations that tell the story 
+> * Learning objectives: should promote learning objectives such as literacy, comprehension, vocabulary, and empathy 
 > 
-> Here are some factors I consider in choosing a series:
+> With these factors in mind, here are some series that caught my attention: 
 > 
-> * Reading level: should be accessible to my students (around Grade 3-4)
-> * Thematic resonance: should resonate with the current year group, focusing on issues relevant to them
-> * Illustrations: colorful and engaging, or illustrations that tell the story
-> * Learning objectives: should promote learning objectives such as literacy, comprehension, vocabulary, and empathy
+> 1. **The Gruffalo** series by Julia Donaldson and Axel Scheffler 
+>         * Reading level: Upper-Primary 
+>         * Thematic resonance: Humor, friendship, and resilience 
+>         * Illustrations: Colorful, witty, and engaging 
+>         * Learning objectives: Literacy, vocabulary, and comprehension 
+> 2. **The Diary of a Wimpy Kid** series by Jeff Kinney 
+>         * Reading level: Upper-Primary 
+>         * Thematic resonance: Humor, friendship, and growing up 
+>         * Illustrations: Colorful and humorous 
+>         * Learning objectives: Literacy, vocabulary, and empathy 
+> 3. **The Magic Tree House** series by Mary Pope Osborne 
+>         * Reading level: Upper-Primary 
+>         * Thematic resonance: Adventure, friendship, and exploration 
+>         * Illustrations: Engaging and detailed 
+>         * Learning objectives: Literacy, comprehension, and vocabulary 
+> 4. **Zoey and Sassafras** series by Asia Citro 
+>         * Reading level: Upper-Primary 
+>         * Thematic resonance: Science, friendship, and empathy 
+>         * Illustrations: Whimsical and engaging 
+>         * Learning objectives: Literacy, vocabulary, and scientific inquiry 
+> 5. **The Nowhere Girls** series by Amy Reed 
+>         * Reading level: Upper-Primary 
+>         * Thematic resonance: Friendship, resilience, and social justice 
+>         * Illustrations: Minimal, but effective 
+>         * Learning objectives: Literacy, empathy, and social-emotional learning 
 > 
-> With these factors in mind, here are some series that caught my attention:
+> These series have all been praised for their engaging storytelling, memorable characters, and thematic resonance. They also align with the learning objectives and English curriculum. However, I would like to know: 
+>  
+> * Which series do you think would be most suitable for a Year 3/4 class of 14 students? 
+> * Are there any other series that you think I should consider? 
 > 
-> 1. **The Gruffalo** series by Julia Donaldson and Axel Scheffler
->         * Reading level: Upper-Primary
->         * Thematic resonance: Humor, friendship, and resilience
->         * Illustrations: Colorful, witty, and engaging
->         * Learning objectives: Literacy, vocabulary, and comprehension
-> 2. **The Diary of a Wimpy Kid** series by Jeff Kinney
->         * Reading level: Upper-Primary
->         * Thematic resonance: Humor, friendship, and growing up
->         * Illustrations: Colorful and humorous
->         * Learning objectives: Literacy, vocabulary, and empathy
-> 3. **The Magic Tree House** series by Mary Pope Osborne
->         * Reading level: Upper-Primary
->         * Thematic resonance: Adventure, friendship, and exploration
->         * Illustrations: Engaging and detailed
->         * Learning objectives: Literacy, comprehension, and vocabulary
-> 4. **Zoey and Sassafras** series by Asia Citro
->         * Reading level: Upper-Primary
->         * Thematic resonance: Science, friendship, and empathy
->         * Illustrations: Whimsical and engaging
->         * Learning objectives: Literacy, vocabulary, and scientific inquiry
-> 5. **The Nowhere Girls** series by Amy Reed
->         * Reading level: Upper-Primary
->         * Thematic resonance: Friendship, resilience, and social justice
->         * Illustrations: Minimal, but effective
->         * Learning objectives: Literacy, empathy, and social-emotional learning
-> 
-> These series have all been praised for their engaging storytelling, memorable characters, and thematic resonance. They also align with the learning objectives and English curriculum. However, I would like to know:
-> 
-> * Which series do you think would be most suitable for a Year 3/4 class of 14 students?
-> * Are there any other series that you think I should consider?
-> 
-> Please feel free to share your thoughts, and I'll be happy to discuss further!
-> 
+> Please feel free to share your thoughts, and I'll be happy to discuss further! 
+>  
 > achieved tok/s: 5.409553
 
 ## llama3.c - A faithful clone of Karpathy's llama2.c but fully functional with LLaMA 3 8B base and instruct models.
