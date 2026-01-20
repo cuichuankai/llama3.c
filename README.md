@@ -4,7 +4,7 @@ After optimization with NEON instructions, running the int8 quantized Llama-3.2 
 git clone https://github.com/cuichuankai/llama3.c.git
 cd llama3.c
 make androidq-arm64
-./llama3_runq ./llama3.2_3b_instruct_q80.bin  -z ./llama3_tokenizer.bin -i "i am a teacher"
+./bin/android/arm64-v8a/runq ./llama3.2_3b_instruct_q80.bin  -z ./llama3_tokenizer.bin -i "i am a teacher"
 ```
 > i am a teacher looking for a series to read with my class of Year 3/4 students. There are 14 students in the class, so a series with 7-10 books would be ideal. I'm looking for something that will engage my students, promote learning, and align with the English curriculum.
 > 
@@ -49,6 +49,7 @@ make androidq-arm64
 > * Are there any other series that you think I should consider?
 > 
 > Please feel free to share your thoughts, and I'll be happy to discuss further!
+> 
 > achieved tok/s: 5.409553
 
 ## llama3.c - A faithful clone of Karpathy's llama2.c but fully functional with LLaMA 3 8B base and instruct models.
@@ -72,7 +73,7 @@ Please note that this repo is a modificaion of Andrej Karpathy's llama2.c but ch
 First, navigate to the folder where you keep your projects and clone this repository to this folder:
 
 ```bash
-git clone https://github.com/cuichuankai/llama3.c.git
+git clone https://github.com/jameswdelancey/llama3.c.git
 ```
 
 Then, open the repository folder:
@@ -116,12 +117,6 @@ gcc -Ofast run.c -o run
 
 ```bash
 $ gcc -Ofast -fopenmp -march=native run.c win.c -o run
-```
-# high performance with NEON
-You can build a high performance android native bin which optimized through NEON instructions
-```bash
-$ make androidq-arm64
-./bin/android/arm64-v8a/runq "llama3_8b_instruct_q8.bin" -z "../dev/tokenizer_llama3.bin" -i "Once upon a time"
 ```
 
 # base model single shot
