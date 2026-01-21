@@ -1,4 +1,5 @@
-## llama3.c - The optimized version of llama3.c that can run on the Android platform.
+# llama3.c - The optimized version of llama3.c that can run on the Android platform.
+## optimization by NEON instructions
 After optimization with NEON instructions, running the int8 quantized Llama-3.2 3B model on a Qualcomm Snapdragon 865 with Android 10 increased the inference speed from 2.1 tok/s to 5.4 tok/s.
 ```bash
 git clone https://github.com/cuichuankai/llama3.c.git
@@ -10,7 +11,7 @@ make androidq-arm64
 >  
 > Here are some factors I consider in choosing a series: 
 >  
-> * Reading level: should be accessible to my students (around Grade 3-4) 
+> * Reading level: should be accessible to my students (around Grade 3-4)  
 > * Thematic resonance: should resonate with the current year group, focusing on issues relevant to them 
 > * Illustrations: colorful and engaging, or illustrations that tell the story 
 > * Learning objectives: should promote learning objectives such as literacy, comprehension, vocabulary, and empathy 
@@ -18,30 +19,30 @@ make androidq-arm64
 > With these factors in mind, here are some series that caught my attention: 
 > 
 > 1. **The Gruffalo** series by Julia Donaldson and Axel Scheffler 
->         * Reading level: Upper-Primary 
->         * Thematic resonance: Humor, friendship, and resilience 
->         * Illustrations: Colorful, witty, and engaging 
->         * Learning objectives: Literacy, vocabulary, and comprehension 
+>        * Reading level: Upper-Primary 
+>        * Thematic resonance: Humor, friendship, and resilience 
+>        * Illustrations: Colorful, witty, and engaging 
+>        * Learning objectives: Literacy, vocabulary, and comprehension 
 > 2. **The Diary of a Wimpy Kid** series by Jeff Kinney 
->         * Reading level: Upper-Primary 
->         * Thematic resonance: Humor, friendship, and growing up 
->         * Illustrations: Colorful and humorous 
->         * Learning objectives: Literacy, vocabulary, and empathy 
+>        * Reading level: Upper-Primary 
+>        * Thematic resonance: Humor, friendship, and growing up 
+>        * Illustrations: Colorful and humorous 
+>        * Learning objectives: Literacy, vocabulary, and empathy 
 > 3. **The Magic Tree House** series by Mary Pope Osborne 
->         * Reading level: Upper-Primary 
->         * Thematic resonance: Adventure, friendship, and exploration 
->         * Illustrations: Engaging and detailed 
->         * Learning objectives: Literacy, comprehension, and vocabulary 
+>        * Reading level: Upper-Primary 
+>        * Thematic resonance: Adventure, friendship, and exploration 
+>        * Illustrations: Engaging and detailed 
+>        * Learning objectives: Literacy, comprehension, and vocabulary 
 > 4. **Zoey and Sassafras** series by Asia Citro 
->         * Reading level: Upper-Primary 
->         * Thematic resonance: Science, friendship, and empathy 
->         * Illustrations: Whimsical and engaging 
->         * Learning objectives: Literacy, vocabulary, and scientific inquiry 
+>        * Reading level: Upper-Primary 
+>        * Thematic resonance: Science, friendship, and empathy 
+>        * Illustrations: Whimsical and engaging 
+>        * Learning objectives: Literacy, vocabulary, and scientific inquiry 
 > 5. **The Nowhere Girls** series by Amy Reed 
->         * Reading level: Upper-Primary 
->         * Thematic resonance: Friendship, resilience, and social justice 
->         * Illustrations: Minimal, but effective 
->         * Learning objectives: Literacy, empathy, and social-emotional learning 
+>        * Reading level: Upper-Primary 
+>        * Thematic resonance: Friendship, resilience, and social justice 
+>        * Illustrations: Minimal, but effective 
+>        * Learning objectives: Literacy, empathy, and social-emotional learning 
 > 
 > These series have all been praised for their engaging storytelling, memorable characters, and thematic resonance. They also align with the learning objectives and English curriculum. However, I would like to know: 
 >  
@@ -52,7 +53,16 @@ make androidq-arm64
 >  
 > achieved tok/s: 5.409553
 
-## llama3.c - A faithful clone of Karpathy's llama2.c but fully functional with LLaMA 3 8B base and instruct models.
+##  OpenAI API compatible
+A lightweight, OpenAI API compatible, HTTP server for running LLaMA 3 models.
+* Start a local HTTP server with port 9000 (new mode -m server)
+> LLAMA3_PORT=9000 ./runq ./llama3.2_3b_instruct_q80.bin -z ./llama3_tokenizer.bin -m server
+* Support web browser access to the server
+> http://localhost:9000
+* Support OpenAI API compatible requests
+* Support streaming responses
+
+# llama3.c - A faithful clone of Karpathy's llama2.c but fully functional with LLaMA 3 8B base and instruct models.
 
 See [Andrej Karpathy's repo](https://github.com/karpathy/llama2.c) for the real deal built for llama2.c architecture and many other cool models he has built.
 

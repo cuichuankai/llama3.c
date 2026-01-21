@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "server_mode.h"
 #if defined _WIN32
 #include "win.h"
 #else
@@ -1606,7 +1607,7 @@ void error_usage() {
   fprintf(stderr, "  -n <int>    number of steps to run for, default 4096. 0 = max_seq_len\n");
   fprintf(stderr, "  -i <string> input prompt\n");
   fprintf(stderr, "  -z <string> optional path to custom tokenizer\n");
-  fprintf(stderr, "  -m <string> mode: generate|chat, default: generate\n");
+  fprintf(stderr, "  -m <string> mode: generate|chat|server, default: generate\n");
   fprintf(stderr, "  -y <string> (optional) system prompt in chat mode\n");
   exit(EXIT_FAILURE);
 }
@@ -1697,6 +1698,8 @@ int main(int argc, char *argv[]) {
     generate(&transformer, &tokenizer, &sampler, prompt, steps);
   } else if (strcmp(mode, "chat") == 0) {
     chat(&transformer, &tokenizer, &sampler, prompt, system_prompt, steps);
+  } else if (strcmp(mode, "server") == 0) {
+    server_mode(&transformer, &tokenizer, &sampler, steps, checkpoint_path);
   } else {
     fprintf(stderr, "unknown mode: %s\n", mode);
     error_usage();

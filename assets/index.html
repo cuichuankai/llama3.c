@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Chat UI</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:0;background:#f8fafc;color:#0f172a}
+.navbar{position:sticky;top:0;background:#ffffff;border-bottom:1px solid #e5e7eb;padding:10px 16px;display:flex;align-items:center;gap:12px}
+.brand{font-weight:600;color:#334155}
+select{background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;padding:8px}
+.system{padding:8px 16px;border-bottom:1px solid #e5e7eb;background:#ffffff}
+.system textarea{width:100%;max-width:100%;min-height:60px;background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;padding:10px;overflow:auto;resize:vertical}
+.container{display:flex;flex-direction:column;height:calc(100vh - 120px)}
+.chat{flex:1;min-height:0;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:#f8fafc;word-break:break-word;overflow-wrap:anywhere}
+.composer{position:sticky;bottom:0;z-index:10;padding:12px 16px;border-top:1px solid #e5e7eb;background:#ffffff;display:flex;gap:10px;padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+.composer textarea{flex:1;min-height:60px;max-height:25vh;background:#ffffff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;padding:10px;overflow:auto;resize:vertical;max-width:100%}
+button{background:#2563eb;color:#ffffff;border:none;border-radius:8px;padding:10px 16px;cursor:pointer}
+button#reset{background:#e5e7eb;color:#0f172a}
+.msg{max-width:90%;padding:10px 12px;border-radius:14px;line-height:1.6;white-space:pre-wrap}
+.msg.assistant{align-self:flex-start;background:#f1f5f9;border:1px solid #e2e8f0;color:#0f172a}
+.msg.user{align-self:flex-end;background:#60a5fa;color:#ffffff}
+</style>
+</head>
+<body>
+<div class="navbar">
+  <div class="brand">LLM Chat</div>
+  <select id="port">
+    <option value="">auto</option>
+    <option>8000</option>
+    <option>9000</option>
+    <option>7000</option>
+  </select>
+</div>
+<div class="system">
+  <textarea id="system" placeholder="You are helpful.">You are helpful.</textarea>
+</div>
+<div class="container">
+  <div id="chat" class="chat"></div>
+  <div class="composer">
+    <textarea id="user" placeholder="Type your message"></textarea>
+    <button id="send">Send</button>
+    <button id="reset">Reset</button>
+  </div>
+</div>
+<script>
+const byId=n=>document.getElementById(n);
+function baseUrl(){const p=byId('port').value;return 'http://'+location.hostname+':'+(p||location.port||'8000')}
+let messages=[];
+function resetChat(){messages=[];byId('chat').innerHTML='';byId('user').value=''}
+function bubble(text, who){const el=document.createElement('div');el.className='msg '+who;el.textContent=text;byId('chat').appendChild(el);return el}
+function appendUser(text){bubble(text,'user')}
+function appendAssistantStart(){return bubble('', 'assistant')}
+function appendAssistantDelta(el, delta){el.textContent+=delta}
+async function send(){const sys=byId('system').value||'';const usr=byId('user').value||'';const mt=4096;if(!usr.trim())return;if(!messages.length&&sys){messages.push({role:'system',content:sys})}messages.push({role:'user',content:usr});appendUser(usr);byId('user').value='';const assistEl=appendAssistantStart();const body={model:'local',messages:messages,max_tokens:mt,stream:true};const r=await fetch(baseUrl()+"/v1/chat/completions",{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const reader=r.body.getReader();const dec=new TextDecoder();let buf='';let acc='';while(true){const s=await reader.read();if(s.done)break;buf+=dec.decode(s.value,{stream:true});const parts=buf.split("\n\n");buf=parts.pop();for(const part of parts){const line=part.split("\n").find(x=>x.startsWith('data: '));if(!line)continue;const payload=line.slice(6).trim();if(payload==='[DONE]'){messages.push({role:'assistant',content:acc});return}try{const obj=JSON.parse(payload);const delta=(obj&&obj.choices&&obj.choices[0]&&obj.choices[0].delta&&obj.choices[0].delta.content)||'';if(delta){appendAssistantDelta(assistEl, delta);acc+=delta}}catch(e){}}}}
+new MutationObserver(()=>{const ch=byId('chat');ch.scrollTop=ch.scrollHeight}).observe(byId('chat'),{childList:true,subtree:true,characterData:true});
+byId('send').addEventListener('click',send);
+byId('reset').addEventListener('click',resetChat);
+byId('port').addEventListener('change',()=>{});
+</script>
+</body>
+</html>
